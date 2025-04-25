@@ -14,13 +14,27 @@ dynamodb_endpoint = os.environ.get('DYNAMODB_ENDPOINT')
 
 # Configure DynamoDB connection
 if dynamodb_endpoint:
-    # Local development
+    # Local development - more explicit credential disabling
     logger.info(f"Using local DynamoDB endpoint: {dynamodb_endpoint}")
     dynamodb = boto3.resource('dynamodb', 
                               endpoint_url=dynamodb_endpoint,
                               region_name='local',
                               aws_access_key_id='dummy',
-                              aws_secret_access_key='dummy')
+                              aws_secret_access_key='dummy',
+                              aws_session_token='dummy',
+                              config=boto3.session.Config(
+                                  signature_version='v4',
+                                  retries={'max_attempts': 0},
+                                  connect_timeout=1,
+                                  read_timeout=1
+                              ))
+    # Make sure client has the same config
+    dynamodb_client = boto3.client('dynamodb',
+                              endpoint_url=dynamodb_endpoint,
+                              region_name='local', 
+                              aws_access_key_id='dummy',
+                              aws_secret_access_key='dummy',
+                              aws_session_token='dummy')
 else:
     # Production AWS
     logger.info("Using AWS DynamoDB service")
@@ -40,160 +54,138 @@ class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)
-        return super(DecimalEncoder, self).default(obj)
+        return super().default(obj)
 
-def test_dynamodb_connection():
-    """Test the connection to DynamoDB and return connection status information."""
+def format_response(status_code, body):
+    return {
+        'statusCode': status_code,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        },
+        'body': json.dumps(body, cls=DecimalEncoder)
+    }
+
+def get_sessions_by_date(date):
+    """Get all sessions for a specific date across all classrooms"""
     try:
-        # List tables to verify connection
-        logger.info("Testing DynamoDB connection...")
-        table_list = dynamodb_client.list_tables(Limit=10)
-        tables = table_list.get('TableNames', [])
+        response = table.query(
+            IndexName='DateIndex',
+            KeyConditionExpression=Key('Date').eq(date)
+        )
+        items = response.get('Items', [])
         
-        # Check if our table exists
-        table_exists = table_name in tables
-        
-        # If table exists, try to describe it
-        table_details = None
-        if table_exists:
-            table_info = dynamodb_client.describe_table(TableName=table_name)
-            table_details = {
-                'name': table_info['Table']['TableName'],
-                'status': table_info['Table']['TableStatus'],
-                'item_count': table_info['Table'].get('ItemCount', 0),
-                'creation_date': str(table_info['Table']['CreationDateTime']),
-                'key_schema': table_info['Table']['KeySchema']
-            }
-        
-        return {
-            'connection_successful': True,
-            'endpoint': dynamodb_endpoint or 'AWS DynamoDB service',
-            'tables_found': len(tables),
-            'tables': tables,
-            'table_exists': table_exists,
-            'table_details': table_details if table_exists else None
-        }
+        # Handle pagination if needed
+        while 'LastEvaluatedKey' in response:
+            response = table.query(
+                IndexName='DateIndex',
+                KeyConditionExpression=Key('Date').eq(date),
+                ExclusiveStartKey=response['LastEvaluatedKey']
+            )
+            items.extend(response.get('Items', []))
+            
+        return format_response(200, items)
     except Exception as e:
-        logger.error(f"DynamoDB connection test failed: {str(e)}")
-        return {
-            'connection_successful': False,
-            'endpoint': dynamodb_endpoint or 'AWS DynamoDB service',
-            'error': str(e)
-        }
+        logger.error(f"Error getting sessions by date: {str(e)}")
+        return format_response(500, {"error": str(e)})
+
+def get_session_by_classroom_and_date(classroom_id, date):
+    """Get session for a specific classroom and date"""
+    try:
+        # First get all sessions for the classroom
+        response = table.query(
+            KeyConditionExpression=Key('ClassRoomID').eq(classroom_id)
+        )
+        
+        items = response.get('Items', [])
+        
+        # Filter by date
+        filtered_items = [item for item in items if item.get('Date') == date]
+        
+        if not filtered_items:
+            return format_response(404, {"message": "No session found for this date"})
+            
+        return format_response(200, filtered_items[0])
+    except Exception as e:
+        logger.error(f"Error getting session: {str(e)}")
+        return format_response(500, {"error": str(e)})
+
+def get_classroom_sessions(classroom_id):
+    """Get all sessions for a specific classroom"""
+    try:
+        response = table.query(
+            KeyConditionExpression=Key('ClassRoomID').eq(classroom_id)
+        )
+        items = response.get('Items', [])
+        
+        # Handle pagination
+        while 'LastEvaluatedKey' in response:
+            response = table.query(
+                KeyConditionExpression=Key('ClassRoomID').eq(classroom_id),
+                ExclusiveStartKey=response['LastEvaluatedKey']
+            )
+            items.extend(response.get('Items', []))
+            
+        return format_response(200, items)
+    except Exception as e:
+        logger.error(f"Error getting classroom sessions: {str(e)}")
+        return format_response(500, {"error": str(e)})
+
+def get_session_by_id(session_id):
+    """Get a specific session by its ID"""
+    try:
+        # This scan is inefficient for large tables - consider adding a GSI for SessionID if needed
+        response = table.scan(
+            FilterExpression=Key('SessionID').eq(session_id)
+        )
+        items = response.get('Items', [])
+        
+        if not items:
+            return format_response(404, {"message": "Session not found"})
+            
+        return format_response(200, items[0])
+    except Exception as e:
+        logger.error(f"Error getting session by ID: {str(e)}")
+        return format_response(500, {"error": str(e)})
 
 def lambda_handler(event, context):
     try:
-        # Test the DynamoDB connection first
-        connection_result = test_dynamodb_connection()
-        logger.info(f"DynamoDB connection test: {json.dumps(connection_result)}")
+        http_method = event.get('httpMethod')
+        path = event.get('path')
+        path_params = event.get('pathParameters', {})
+        query_params = event.get('queryStringParameters', {})
         
-        # If connection failed, return error immediately
-        if not connection_result['connection_successful']:
-            return {
-                'statusCode': 500,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps({
-                    'error': 'Failed to connect to DynamoDB',
-                    'details': connection_result
-                })
-            }
+        logger.info(f"Received request: {http_method} {path}")
         
-        # If table doesn't exist, return error
-        if not connection_result.get('table_exists', False):
-            return {
-                'statusCode': 500,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps({
-                    'error': f"Table '{table_name}' does not exist",
-                    'available_tables': connection_result.get('tables', []),
-                    'connection_details': connection_result
-                })
-            }
-        
-        # Log the entire event for debugging
-        logger.info(f"Received event: {json.dumps(event)}")
-        
-        # Get HTTP method from event
-        http_method = event.get('httpMethod', '')
-        path_parameters = event.get('pathParameters', {}) or {}
-        query_parameters = event.get('queryStringParameters', {}) or {}
-        
-        logger.info(f"HTTP Method: {http_method}")
-        logger.info(f"Path Parameters: {path_parameters}")
-        logger.info(f"Query Parameters: {query_parameters}")
-        
+        # Route the request
         if http_method == 'GET':
-            # Rest of your code remains the same...
-            # For brevity, I'm only including a simple scan example
-            
-            try:
-                # Try a sample scan with a very small limit to test access
-                logger.info("Performing test scan with limit 1")
-                test_scan = table.scan(Limit=1)
-                scan_successful = True
-                sample_items = test_scan.get('Items', [])
-                logger.info(f"Test scan successful, found {len(sample_items)} items")
-            except Exception as scan_error:
-                logger.error(f"Test scan failed: {str(scan_error)}")
-                return {
-                    'statusCode': 500,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*'
-                    },
-                    'body': json.dumps({
-                        'error': 'Connected to DynamoDB but failed to scan table',
-                        'details': str(scan_error),
-                        'connection_details': connection_result
-                    })
-                }
-            
-            # Return success with connection details
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps({
-                    'message': 'DynamoDB connection successful!',
-                    'connection_details': connection_result,
-                    'sample_data': sample_items if sample_items else "No items found in table"
-                }, cls=DecimalEncoder)
-            }
+            if path == '/sessions/date':
+                date = query_params.get('date')
+                if not date:
+                    return format_response(400, {"error": "Date parameter is required"})
+                return get_sessions_by_date(date)
+                
+            elif path.startswith('/classroom/') and '/sessions' in path:
+                classroom_id = path_params.get('classroom_id')
+                if not classroom_id:
+                    return format_response(400, {"error": "Classroom ID is required"})
+                return get_classroom_sessions(classroom_id)
+                
+            elif path.startswith('/classroom/'):
+                classroom_id = path_params.get('classroom_id')
+                date = query_params.get('date')
+                if not classroom_id or not date:
+                    return format_response(400, {"error": "Classroom ID and date are required"})
+                return get_session_by_classroom_and_date(classroom_id, date)
+                
+            elif path.startswith('/session/'):
+                session_id = path_params.get('session_id')
+                if not session_id:
+                    return format_response(400, {"error": "Session ID is required"})
+                return get_session_by_id(session_id)
         
-        # Default response for unsupported methods
-        return {
-            'statusCode': 400,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps({
-                'error': f'Unsupported method: {http_method}',
-                'connection_details': connection_result
-            })
-        }
-    
+        return format_response(404, {"error": "Not found"})
+        
     except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps({
-                'error': str(e),
-                'trace': traceback.format_exc()
-            })
-        }
+        logger.error(f"Error in lambda handler: {str(e)}")
+        return format_response(500, {"error": "Internal server error"})

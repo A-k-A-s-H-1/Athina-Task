@@ -1,8 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: >
-  bookstore-app
-  Sample SAM Template for bookstore-app
+Description: Classroom Sessions API
 
 Globals:
   Function:
@@ -10,10 +8,8 @@ Globals:
     Environment:
       Variables:
         TABLE_NAME: ClassroomSessions
-        # Add this for local development
         DYNAMODB_ENDPOINT: http://host.docker.internal:8000
         AWS_REGION: local
-        
 
 Resources:
   ClassroomSessionsTable:
@@ -35,57 +31,58 @@ Resources:
         - AttributeName: SessionID
           KeyType: RANGE
       GlobalSecondaryIndexes:
-        - IndexName: CohortIndex
+        - IndexName: DateIndex
           KeySchema:
-            - AttributeName: CohortID
-              KeyType: HASH
             - AttributeName: Date
+              KeyType: HASH
+            - AttributeName: ClassRoomID
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
-      # Add this for local testing with SAM CLI
       BillingMode: PAY_PER_REQUEST
-            
+      SSESpecification:
+        SSEEnabled: true
+
   ClassroomSessionFunction:
-      Type: AWS::Serverless::Function
-      Properties:
-        CodeUri: api_function/
-        Handler: app.lambda_handler
-        Runtime: python3.13
-        Policies: 
-          - DynamoDBCrudPolicy:
-              TableName: !Ref ClassroomSessionsTable
-        Architectures:
-           - x86_64
-        Events:
-          GetAllSessions:
-            Type: Api
-            Properties:
-               Path: /sessions
-               Method: get
-          GetSessionsByClassroom:
-            Type: Api
-            Properties:
-               Path: /classroom/{classroom_id}/sessions
-               Method: get
-          GetSpecificSession:
-            Type: Api
-            Properties:
-               Path: /classroom/{classroom_id}/session/{session_id}
-               Method: get
-              
-  
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: api_function/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Policies: 
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ClassroomSessionsTable
+      Architectures:
+        - x86_64
+      Events:
+        GetSessionsByDate:
+          Type: Api
+          Properties:
+            Path: /sessions/date
+            Method: get
+        GetSessionByClassroomAndDate:
+          Type: Api
+          Properties:
+            Path: /classroom/{classroom_id}
+            Method: get
+        GetClassroomSessions:
+          Type: Api
+          Properties:
+            Path: /classroom/{classroom_id}/sessions
+            Method: get
+        GetSessionById:
+          Type: Api
+          Properties:
+            Path: /session/{session_id}
+            Method: get
 
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  HelloWorldApi:
-    Description: "API Gateway endpoint URL for Prod stage for Hello World function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/hello/"
-  HelloWorldFunction:
-    Description: "Hello World Lambda Function ARN"
-    Value: !GetAtt HelloWorldFunction.Arn
-  HelloWorldFunctionIamRole:
-    Description: "Implicit IAM Role created for Hello World function"
-    Value: !GetAtt HelloWorldFunctionRole.Arn
+  ClassroomSessionsApi:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  ClassroomSessionFunction:
+    Description: Lambda Function ARN
+    Value: !GetAtt ClassroomSessionFunction.Arn
+  ClassroomSessionsTableName:
+    Description: DynamoDB Table Name
+    Value: !Ref ClassroomSessionsTable
