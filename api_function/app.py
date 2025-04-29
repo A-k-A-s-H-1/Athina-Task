@@ -90,7 +90,7 @@ def get_sessions_by_date(date):
         return format_response(500, {"error": str(e)})
 
 def get_session_by_classroom_and_date(classroom_id, date):
-    """Get session for a specific classroom and date"""
+    """Get all sessions for a specific classroom and date"""
     try:
         # First get all sessions for the classroom
         response = table.query(
@@ -105,7 +105,8 @@ def get_session_by_classroom_and_date(classroom_id, date):
         if not filtered_items:
             return format_response(404, {"message": "No session found for this date"})
             
-        return format_response(200, filtered_items[0])
+        # Return all filtered items instead of just the first one
+        return format_response(200, filtered_items)
     except Exception as e:
         logger.error(f"Error getting session: {str(e)}")
         return format_response(500, {"error": str(e)})
