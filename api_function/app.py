@@ -172,7 +172,7 @@ def lambda_handler(event, context):
                     return format_response(400, {"error": "Classroom ID is required"})
                 return get_classroom_sessions(classroom_id)
                 
-            elif path.startswith('/classroom/'):
+            elif path.startswith('/institutes/'):
                 classroom_id = path_params.get('classroom_id')
                 date = query_params.get('date')
                 if not classroom_id or not date:

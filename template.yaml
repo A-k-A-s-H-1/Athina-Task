@@ -63,7 +63,7 @@ Resources:
         GetSessionByClassroomAndDate:
           Type: Api
           Properties:
-            Path: /classroom/{classroom_id}
+            Path: /institutes/{institute_id}/locations/{location_id}/campuses/{campus_id}/classrooms/{classroom_id}/sessions
             Method: get
         GetClassroomSessions:
           Type: Api
