@@ -9,7 +9,10 @@ Globals:
       Variables:
         TABLE_NAME: ClassroomSessions
         DYNAMODB_ENDPOINT: http://host.docker.internal:8000
-        AWS_REGION: local
+        AWS_REGION_NAME: 
+        AWS_ACCESS_KEY_ID: 
+        AWS_SECRET_ACCESS_KEY: 
+        
 
 Resources:
   ClassroomSessionsTable:
@@ -49,31 +52,13 @@ Resources:
       CodeUri: api_function/
       Handler: app.lambda_handler
       Runtime: python3.13
-      Policies: 
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ClassroomSessionsTable
       Architectures:
         - x86_64
       Events:
-        GetSessionsByDate:
-          Type: Api
-          Properties:
-            Path: /sessions/date
-            Method: get
         GetSessionByClassroomAndDate:
           Type: Api
           Properties:
             Path: /institutes/{institute_id}/locations/{location_id}/campuses/{campus_id}/classrooms/{classroom_id}/sessions
-            Method: get
-        GetClassroomSessions:
-          Type: Api
-          Properties:
-            Path: /classroom/{classroom_id}/sessions
-            Method: get
-        GetSessionById:
-          Type: Api
-          Properties:
-            Path: /session/{session_id}
             Method: get
 
 Outputs:

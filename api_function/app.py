@@ -11,6 +11,9 @@ logger.setLevel(logging.INFO)
 
 # Get environment variables
 dynamodb_endpoint = os.environ.get('DYNAMODB_ENDPOINT')
+aws_region_name=os.environ.get('AWS_REGION_NAME')
+aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID')   
+aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY')
 
 # Configure DynamoDB connection
 if dynamodb_endpoint:
@@ -18,10 +21,9 @@ if dynamodb_endpoint:
     logger.info(f"Using local DynamoDB endpoint: {dynamodb_endpoint}")
     dynamodb = boto3.resource('dynamodb', 
                               endpoint_url=dynamodb_endpoint,
-                              region_name='local',
-                              aws_access_key_id='dummy',
-                              aws_secret_access_key='dummy',
-                              aws_session_token='dummy',
+                              region_name=aws_region_name,
+                              aws_access_key_id=aws_access_key_id,
+                              aws_secret_access_key=aws_secret_access_key,
                               config=boto3.session.Config(
                                   signature_version='v4',
                                   retries={'max_attempts': 0},
@@ -31,10 +33,9 @@ if dynamodb_endpoint:
     # Make sure client has the same config
     dynamodb_client = boto3.client('dynamodb',
                               endpoint_url=dynamodb_endpoint,
-                              region_name='local', 
-                              aws_access_key_id='dummy',
-                              aws_secret_access_key='dummy',
-                              aws_session_token='dummy')
+                              region_name=aws_region_name, 
+                              aws_access_key_id=aws_access_key_id,
+                              aws_secret_access_key=aws_secret_access_key)
 else:
     # Production AWS
     logger.info("Using AWS DynamoDB service")
@@ -43,9 +44,9 @@ else:
 # Get DynamoDB client for connection testing
 dynamodb_client = boto3.client('dynamodb', 
                               endpoint_url=dynamodb_endpoint,
-                              region_name='local',
-                              aws_access_key_id='dummy',
-                              aws_secret_access_key='dummy') if dynamodb_endpoint else boto3.client('dynamodb')
+                              region_name=aws_region_name,
+                              aws_access_key_id=aws_access_key_id,
+                              aws_secret_access_key=aws_secret_access_key) if dynamodb_endpoint else boto3.client('dynamodb')
 
 table_name = 'ClassroomSessions'
 table = dynamodb.Table(table_name)
